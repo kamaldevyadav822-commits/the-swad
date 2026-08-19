@@ -1,0 +1,220 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    /*
+    ============================================================
+    THE SWAD — FIRESTORE SECURITY RULES
+    ============================================================
+
+    Architecture:
+
+    Customer Browser
+        ↓
+    Express API
+        ↓
+    Firebase Admin SDK
+        ↓
+    Firestore
+
+    Firebase Admin SDK bypasses Firestore Security Rules.
+
+    Therefore these rules intentionally prevent the public
+    browser from directly creating/modifying orders.
+
+    ============================================================
+    */
+
+    /*
+    ------------------------------------------------------------
+    HELPER FUNCTIONS
+    ------------------------------------------------------------
+    */
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && request.auth.token.admin == true;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    PRODUCTS / MENU
+    ------------------------------------------------------------
+
+    Customers can read the menu.
+
+    Only administrators can create, update or delete products.
+    ------------------------------------------------------------
+    */
+
+    match /products/{productId} {
+
+      allow read:
+        if true;
+
+      allow create, update, delete:
+        if isAdmin();
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    ORDERS
+    ------------------------------------------------------------
+
+    IMPORTANT:
+
+    Customer browsers cannot directly:
+
+    - create orders
+    - change prices
+    - change paymentStatus
+    - change order status
+    - modify customer information
+    - modify Razorpay information
+
+    The trusted Express backend uses Firebase Admin SDK.
+
+    Admin users can read orders through authenticated access.
+
+    ------------------------------------------------------------
+    */
+
+    match /orders/{orderId} {
+
+      /*
+      Admin dashboard read access.
+      */
+
+      allow read:
+        if isAdmin();
+
+
+      /*
+      Direct browser writes are disabled.
+
+      Payment/order writes happen through the backend
+      using Firebase Admin SDK.
+      */
+
+      allow create, update, delete:
+        if false;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    ADMIN USERS
+    ------------------------------------------------------------
+
+    We are NOT storing admin credentials in Firestore.
+
+    Firebase Authentication + custom claim:
+
+        admin: true
+
+    determines administrator access.
+
+    Therefore arbitrary users cannot create or modify
+    admin documents.
+    ------------------------------------------------------------
+    */
+
+    match /admins/{adminId} {
+
+      allow read:
+        if isAdmin();
+
+      allow create, update, delete:
+        if false;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    CUSTOMER PROFILES
+    ------------------------------------------------------------
+
+    Currently disabled.
+
+    We don't need a public customer profile database yet.
+
+    This prevents accidental exposure of customer information.
+    ------------------------------------------------------------
+    */
+
+    match /customers/{customerId} {
+
+      allow read, write:
+        if false;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    PAYMENT RECORDS
+    ------------------------------------------------------------
+
+    Razorpay payment verification is performed by the server.
+
+    Customers must never directly manipulate payment records.
+    ------------------------------------------------------------
+    */
+
+    match /payments/{paymentId} {
+
+      allow read:
+        if isAdmin();
+
+      allow create, update, delete:
+        if false;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    ORDER STATUS HISTORY
+    ------------------------------------------------------------
+
+    If status history is stored as a subcollection:
+
+        orders/{orderId}/statusHistory/{historyId}
+
+    only admins may read it.
+
+    Backend writes bypass these rules.
+    ------------------------------------------------------------
+    */
+
+    match /orders/{orderId}/statusHistory/{historyId} {
+
+      allow read:
+        if isAdmin();
+
+      allow create, update, delete:
+        if false;
+    }
+
+
+    /*
+    ------------------------------------------------------------
+    DEFAULT DENY
+    ------------------------------------------------------------
+
+    Any collection not explicitly defined above is blocked.
+    ------------------------------------------------------------
+    */
+
+    match /{document=**} {
+
+      allow read, write:
+        if false;
+    }
+  }
+}
