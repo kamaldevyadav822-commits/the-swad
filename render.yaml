@@ -1,24 +1,35 @@
 services:
+
+  # ==========================================================
+  # THE SWAD - API / BACKEND
+  # ==========================================================
+
   - type: web
-    name: the-swad
+    name: the-swad-api
     runtime: node
+    plan: free
 
     buildCommand: npm install
     startCommand: npm start
 
     healthCheckPath: /api/health
 
-    autoDeploy: true
-
     envVars:
+
       - key: NODE_ENV
         value: production
 
       - key: PORT
         value: 10000
 
+      # ------------------------------------------------------
+      # IMPORTANT:
+      # Do NOT put real secrets in this file.
+      # Add their values from Render Dashboard.
+      # ------------------------------------------------------
+
       - key: CLIENT_ORIGIN
-        value: "*"
+        sync: false
 
       - key: RAZORPAY_KEY_ID
         sync: false
@@ -29,5 +40,32 @@ services:
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
 
-      - key: FIREBASE_DATABASE_URL
-        sync: false
+
+  # ==========================================================
+  # THE SWAD - CUSTOMER FRONTEND
+  # ==========================================================
+
+  - type: web
+    name: the-swad-frontend
+    runtime: static
+    plan: free
+
+    buildCommand: ""
+
+    staticPublishPath: ./public
+
+    routes:
+
+      # Customer app
+      - type: rewrite
+        source: /
+        destination: /index.html
+
+      # Admin app
+      - type: rewrite
+        source: /admin
+        destination: /admin/index.html
+
+      - type: rewrite
+        source: /admin/
+        destination: /admin/index.html
