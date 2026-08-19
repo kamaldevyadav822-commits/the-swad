@@ -5,42 +5,77 @@ import rateLimit from "express-rate-limit";
 import dotenv from "dotenv";
 import Razorpay from "razorpay";
 import crypto from "node:crypto";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import admin from "firebase-admin";
 import { requireAdmin } from "./middleware/admin-auth.js";
 
 dotenv.config();
 
+/* =========================================================
+   THE SWAD
+   Production Node.js API + Customer/Admin Web Server
+   ========================================================= */
+
 const app = express();
 
 const PORT = Number(process.env.PORT || 10000);
-const CLIENT_ORIGIN = process.env.CLIENT_ORIGIN || "*";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/* =========================================================
+   CONFIGURATION
+   ========================================================= */
+
+const CLIENT_ORIGIN =
+  process.env.CLIENT_ORIGIN || "*";
 
 const ALLOWED_ORIGINS =
   CLIENT_ORIGIN === "*"
     ? null
     : CLIENT_ORIGIN
         .split(",")
-        .map((x) => x.trim())
+        .map((origin) => origin.trim())
         .filter(Boolean);
 
-app.set("trust proxy", 1);
+/* =========================================================
+   EXPRESS SECURITY
+   ========================================================= */
 
-/* ==========================================
-   SECURITY
-========================================== */
+app.set("trust proxy", 1);
 
 app.use(
   helmet({
     crossOriginResourcePolicy: {
-      policy: "cross-origin",
-    },
+      policy: "cross-origin"
+    }
   })
 );
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (!origin || !ALLOWED_ORIGINS) {
+      /*
+       * Requests without Origin can be:
+       * - same-origin
+       * - health checks
+       * - server tools
+       */
+
+      if (!origin) {
+        return callback(null, true);
+      }
+
+      /*
+       * If no explicit origin has been configured,
+       * allow the request.
+       *
+       * For production you can set CLIENT_ORIGIN
+       * to your exact Render/custom domain.
+       */
+
+      if (!ALLOWED_ORIGINS) {
         return callback(null, true);
       }
 
@@ -57,38 +92,58 @@ app.use(
       "GET",
       "POST",
       "PATCH",
-      "OPTIONS",
+      "OPTIONS"
     ],
 
     allowedHeaders: [
       "Content-Type",
-      "Authorization",
-    ],
+      "Authorization"
+    ]
   })
 );
 
 app.use(
   express.json({
-    limit: "100kb",
+    limit: "100kb"
   })
 );
 
-/* ==========================================
+/* =========================================================
    RATE LIMITING
-========================================== */
+   ========================================================= */
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+
   limit: 200,
+
   standardHeaders: "draft-7",
+
   legacyHeaders: false,
+
+  message: {
+    success: false,
+
+    error:
+      "Too many requests. Please try again later."
+  }
 });
 
 const paymentLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
+
   limit: 30,
+
   standardHeaders: "draft-7",
+
   legacyHeaders: false,
+
+  message: {
+    success: false,
+
+    error:
+      "Too many payment requests. Please try again later."
+  }
 });
 
 app.use(
@@ -96,21 +151,28 @@ app.use(
   apiLimiter
 );
 
-/* ==========================================
-   FIREBASE ADMIN
-========================================== */
+/* =========================================================
+   FIREBASE ADMIN INITIALIZATION
+   ========================================================= */
 
 let db = null;
 
 try {
-  if (
+  const serviceAccountJSON =
     process.env
-      .FIREBASE_SERVICE_ACCOUNT_JSON
+      .FIREBASE_SERVICE_ACCOUNT_JSON;
+
+  const databaseURL =
+    process.env
+      .FIREBASE_DATABASE_URL;
+
+  if (
+    serviceAccountJSON &&
+    databaseURL
   ) {
     const serviceAccount =
       JSON.parse(
-        process.env
-          .FIREBASE_SERVICE_ACCOUNT_JSON
+        serviceAccountJSON
       );
 
     if (!admin.apps.length) {
@@ -120,20 +182,18 @@ try {
             serviceAccount
           ),
 
-        databaseURL:
-          process.env
-            .FIREBASE_DATABASE_URL,
+        databaseURL
       });
     }
 
     db = admin.database();
 
     console.log(
-      "Firebase Admin initialized."
+      "✓ Firebase Admin initialized"
     );
   } else {
     console.warn(
-      "Firebase Admin is not configured yet."
+      "⚠ Firebase environment variables are not configured."
     );
   }
 } catch (error) {
@@ -143,33 +203,45 @@ try {
   );
 }
 
-/* ==========================================
-   RAZORPAY
-========================================== */
+/* =========================================================
+   RAZORPAY INITIALIZATION
+   ========================================================= */
 
-const razorpayKeyId =
+const RAZORPAY_KEY_ID =
   process.env
     .RAZORPAY_KEY_ID;
 
-const razorpayKeySecret =
+const RAZORPAY_KEY_SECRET =
   process.env
     .RAZORPAY_KEY_SECRET;
 
-const razorpay =
-  razorpayKeyId &&
-  razorpayKeySecret
-    ? new Razorpay({
-        key_id:
-          razorpayKeyId,
+let razorpay = null;
 
-        key_secret:
-          razorpayKeySecret,
-      })
-    : null;
+if (
+  RAZORPAY_KEY_ID &&
+  RAZORPAY_KEY_SECRET
+) {
+  razorpay =
+    new Razorpay({
+      key_id:
+        RAZORPAY_KEY_ID,
 
-/* ==========================================
-   BUSINESS CONFIG
-========================================== */
+      key_secret:
+        RAZORPAY_KEY_SECRET
+    });
+
+  console.log(
+    "✓ Razorpay initialized"
+  );
+} else {
+  console.warn(
+    "⚠ Razorpay environment variables are not configured."
+  );
+}
+
+/* =========================================================
+   BUSINESS CONFIGURATION
+   ========================================================= */
 
 const BUSINESS = {
   name: "The Swad",
@@ -178,12 +250,23 @@ const BUSINESS = {
 
   deliveryFee: 30,
 
-  freeDeliveryMinimum: 500,
+  freeDeliveryMinimum: 500
 };
 
-/* ==========================================
+/* =========================================================
    SERVER-SIDE MENU
-========================================== */
+   =========================================================
+
+   IMPORTANT:
+
+   Prices in the browser are NEVER trusted.
+
+   The server calculates the actual order amount
+   from this catalogue.
+
+   Replace these products/prices with your actual
+   The Swad menu before going live.
+   ========================================================= */
 
 const MENU = {
   "special-full-tiffin": {
@@ -195,7 +278,7 @@ const MENU = {
 
     price: 99,
 
-    available: true,
+    available: true
   },
 
   "mini-tiffin": {
@@ -207,7 +290,7 @@ const MENU = {
 
     price: 69,
 
-    available: true,
+    available: true
   },
 
   "veg-thali": {
@@ -219,7 +302,7 @@ const MENU = {
 
     price: 119,
 
-    available: true,
+    available: true
   },
 
   "lunch-combo": {
@@ -231,7 +314,7 @@ const MENU = {
 
     price: 129,
 
-    available: true,
+    available: true
   },
 
   "aloo-paratha": {
@@ -243,7 +326,7 @@ const MENU = {
 
     price: 59,
 
-    available: true,
+    available: true
   },
 
   "dal-rice": {
@@ -255,7 +338,7 @@ const MENU = {
 
     price: 79,
 
-    available: true,
+    available: true
   },
 
   "roti-sabzi": {
@@ -267,7 +350,7 @@ const MENU = {
 
     price: 75,
 
-    available: true,
+    available: true
   },
 
   "paneer-combo": {
@@ -279,24 +362,25 @@ const MENU = {
 
     price: 149,
 
-    available: true,
-  },
+    available: true
+  }
 };
 
-/* ==========================================
+/* =========================================================
    HELPERS
-========================================== */
+   ========================================================= */
 
 function sendError(
   res,
   status,
   message
 ) {
-  return res.status(status).json({
-    success: false,
-
-    error: message,
-  });
+  return res
+    .status(status)
+    .json({
+      success: false,
+      error: message
+    });
 }
 
 function sanitizeText(
@@ -330,115 +414,25 @@ function validatePincode(
   );
 }
 
-/* ==========================================
-   ORDER CALCULATION
-========================================== */
-
-function calculateOrder(
-  items
-) {
-  if (
-    !Array.isArray(items) ||
-    items.length === 0
-  ) {
+function requireFirebase() {
+  if (!db) {
     throw new Error(
-      "Cart is empty."
+      "Firebase is not configured on the server."
     );
   }
-
-  if (items.length > 30) {
-    throw new Error(
-      "Too many different items."
-    );
-  }
-
-  const normalized = [];
-
-  let subtotal = 0;
-
-  for (
-    const raw of items
-  ) {
-    const id =
-      sanitizeText(
-        raw?.id,
-        100
-      );
-
-    const qty =
-      Number(raw?.qty);
-
-    if (
-      !Number.isInteger(qty) ||
-      qty < 1 ||
-      qty > 20
-    ) {
-      throw new Error(
-        "Invalid item quantity."
-      );
-    }
-
-    const product =
-      MENU[id];
-
-    if (
-      !product ||
-      product.available !== true
-    ) {
-      throw new Error(
-        `Item unavailable: ${id}`
-      );
-    }
-
-    const lineTotal =
-      product.price * qty;
-
-    normalized.push({
-      id:
-        product.id,
-
-      name:
-        product.name,
-
-      quantity:
-        qty,
-
-      unitPrice:
-        product.price,
-
-      lineTotal,
-    });
-
-    subtotal +=
-      lineTotal;
-  }
-
-  const deliveryFee =
-    subtotal >=
-    BUSINESS.freeDeliveryMinimum
-      ? 0
-      : BUSINESS.deliveryFee;
-
-  return {
-    items:
-      normalized,
-
-    subtotal,
-
-    deliveryFee,
-
-    total:
-      subtotal +
-      deliveryFee,
-
-    currency:
-      BUSINESS.currency,
-  };
 }
 
-/* ==========================================
+function requireRazorpay() {
+  if (!razorpay) {
+    throw new Error(
+      "Razorpay is not configured on the server."
+    );
+  }
+}
+
+/* =========================================================
    CUSTOMER VALIDATION
-========================================== */
+   ========================================================= */
 
 function validateCustomer(
   customer
@@ -519,59 +513,171 @@ function validateCustomer(
     address,
     landmark,
     pincode,
-    notes,
+    notes
   };
 }
 
-/* ==========================================
+/* =========================================================
+   ORDER CALCULATION
+   ========================================================= */
+
+function calculateOrder(
+  items
+) {
+  if (
+    !Array.isArray(items) ||
+    items.length === 0
+  ) {
+    throw new Error(
+      "Cart is empty."
+    );
+  }
+
+  if (
+    items.length > 30
+  ) {
+    throw new Error(
+      "Too many different items."
+    );
+  }
+
+  const normalizedItems = [];
+
+  let subtotal = 0;
+
+  for (
+    const rawItem of items
+  ) {
+    const id =
+      sanitizeText(
+        rawItem?.id,
+        100
+      );
+
+    const quantity =
+      Number(
+        rawItem?.qty
+      );
+
+    if (
+      !Number.isInteger(
+        quantity
+      ) ||
+      quantity < 1 ||
+      quantity > 20
+    ) {
+      throw new Error(
+        "Invalid item quantity."
+      );
+    }
+
+    const product =
+      MENU[id];
+
+    if (
+      !product ||
+      product.available !== true
+    ) {
+      throw new Error(
+        `Item unavailable: ${id}`
+      );
+    }
+
+    const lineTotal =
+      product.price *
+      quantity;
+
+    normalizedItems.push({
+      id:
+        product.id,
+
+      name:
+        product.name,
+
+      category:
+        product.category,
+
+      quantity,
+
+      unitPrice:
+        product.price,
+
+      lineTotal
+    });
+
+    subtotal +=
+      lineTotal;
+  }
+
+  const deliveryFee =
+    subtotal >=
+    BUSINESS.freeDeliveryMinimum
+      ? 0
+      : BUSINESS.deliveryFee;
+
+  const total =
+    subtotal +
+    deliveryFee;
+
+  return {
+    items:
+      normalizedItems,
+
+    subtotal,
+
+    deliveryFee,
+
+    total,
+
+    currency:
+      BUSINESS.currency
+  };
+}
+
+/* =========================================================
    ORDER ID
-========================================== */
+   ========================================================= */
 
 function makeOrderId() {
-  const stamp =
+  const timestamp =
     Date.now()
       .toString(36)
       .toUpperCase();
 
   const random =
     crypto
-      .randomBytes(3)
+      .randomBytes(4)
       .toString("hex")
       .toUpperCase();
 
-  return `SWAD-${stamp}-${random}`;
+  return `SWAD-${timestamp}-${random}`;
 }
 
-/* ==========================================
-   SERVICE CHECKS
-========================================== */
+/* =========================================================
+   STATIC CUSTOMER WEBSITE
+   ========================================================= */
 
-function requireFirebase() {
-  if (!db) {
-    throw new Error(
-      "Firebase is not configured on the server."
-    );
-  }
-}
+app.use(
+  express.static(
+    path.join(
+      __dirname,
+      "public"
+    ),
+    {
+      extensions: [
+        "html"
+      ]
+    }
+  )
+);
 
-function requireRazorpay() {
-  if (!razorpay) {
-    throw new Error(
-      "Razorpay is not configured on the server."
-    );
-  }
-}
-
-/* ==========================================
-   HEALTH
-========================================== */
+/* =========================================================
+   HEALTH CHECK
+   ========================================================= */
 
 app.get(
   "/api/health",
-  async (
-    req,
-    res
-  ) => {
+  (req, res) => {
     res.json({
       success: true,
 
@@ -581,46 +687,57 @@ app.get(
       status:
         "online",
 
+      environment:
+        process.env
+          .NODE_ENV ||
+        "development",
+
       firebase:
         Boolean(db),
 
-      paymentGateway:
+      razorpay:
         Boolean(razorpay),
 
-      time:
+      timestamp:
         new Date()
-          .toISOString(),
+          .toISOString()
     });
   }
 );
 
-/* ==========================================
+/* =========================================================
    MENU API
-========================================== */
+   ========================================================= */
 
 app.get(
   "/api/menu",
-  (
-    req,
-    res
-  ) => {
+  (req, res) => {
     res.json({
       success: true,
+
+      business:
+        BUSINESS.name,
 
       currency:
         BUSINESS.currency,
 
+      deliveryFee:
+        BUSINESS.deliveryFee,
+
+      freeDeliveryMinimum:
+        BUSINESS.freeDeliveryMinimum,
+
       items:
         Object.values(
           MENU
-        ),
+        )
     });
   }
 );
 
-/* ==========================================
+/* =========================================================
    CREATE RAZORPAY ORDER
-========================================== */
+   ========================================================= */
 
 app.post(
   "/api/payment/create-order",
@@ -632,6 +749,8 @@ app.post(
   ) => {
     try {
       requireRazorpay();
+
+      requireFirebase();
 
       const customer =
         validateCustomer(
@@ -646,7 +765,15 @@ app.post(
       const orderId =
         makeOrderId();
 
-      const razorOrder =
+      /*
+       * Razorpay amount is always
+       * represented in the smallest
+       * currency unit.
+       *
+       * INR ₹99 = 9900 paise.
+       */
+
+      const razorpayOrder =
         await razorpay.orders.create(
           {
             amount:
@@ -663,24 +790,38 @@ app.post(
               business:
                 BUSINESS.name,
 
-              customerPhone:
-                customer.phone,
-
               internalOrderId:
-                orderId,
-            },
+                orderId
+            }
           }
         );
+
+      const now =
+        new Date()
+          .toISOString();
 
       const pendingOrder = {
         orderId,
 
         razorpayOrderId:
-          razorOrder.id,
+          razorpayOrder.id,
 
         customer,
 
-        ...calculation,
+        items:
+          calculation.items,
+
+        subtotal:
+          calculation.subtotal,
+
+        deliveryFee:
+          calculation.deliveryFee,
+
+        total:
+          calculation.total,
+
+        currency:
+          calculation.currency,
 
         status:
           "PAYMENT_PENDING",
@@ -689,23 +830,19 @@ app.post(
           "PENDING",
 
         createdAt:
-          new Date()
-            .toISOString(),
+          now,
 
         updatedAt:
-          new Date()
-            .toISOString(),
+          now
       };
 
-      if (db) {
-        await db
-          .ref(
-            `orders/${orderId}`
-          )
-          .set(
-            pendingOrder
-          );
-      }
+      await db
+        .ref(
+          `orders/${orderId}`
+        )
+        .set(
+          pendingOrder
+        );
 
       return res.json({
         success: true,
@@ -714,21 +851,18 @@ app.post(
           orderId,
 
           razorpayOrderId:
-            razorOrder.id,
+            razorpayOrder.id,
 
           amount:
             calculation.total *
             100,
 
           currency:
-            "INR",
-
-          customerName:
-            customer.name,
+            "INR"
         },
 
         keyId:
-          razorpayKeyId,
+          RAZORPAY_KEY_ID
       });
     } catch (
       error
@@ -748,9 +882,9 @@ app.post(
   }
 );
 
-/* ==========================================
+/* =========================================================
    VERIFY RAZORPAY PAYMENT
-========================================== */
+   ========================================================= */
 
 app.post(
   "/api/payment/verify",
@@ -767,12 +901,9 @@ app.post(
 
       const {
         orderId,
-
         razorpayOrderId,
-
         razorpayPaymentId,
-
-        razorpaySignature,
+        razorpaySignature
       } =
         req.body || {};
 
@@ -810,6 +941,12 @@ app.post(
       const order =
         snapshot.val();
 
+      /*
+       * Prevent a payment belonging
+       * to another Razorpay order from
+       * being attached to this order.
+       */
+
       if (
         order.razorpayOrderId !==
         razorpayOrderId
@@ -821,6 +958,12 @@ app.post(
         );
       }
 
+      /*
+       * Idempotency:
+       * If this order was already verified,
+       * do not create a duplicate state change.
+       */
+
       if (
         order.paymentStatus ===
         "PAID"
@@ -831,25 +974,32 @@ app.post(
           verified:
             true,
 
+          alreadyVerified:
+            true,
+
           orderId,
 
           status:
-            order.status,
+            order.status
         });
       }
+
+      /*
+       * Verify Razorpay signature.
+       */
 
       const generatedSignature =
         crypto
           .createHmac(
             "sha256",
-            razorpayKeySecret
+            RAZORPAY_KEY_SECRET
           )
           .update(
             `${razorpayOrderId}|${razorpayPaymentId}`
           )
           .digest("hex");
 
-      const receivedSignature =
+      const received =
         Buffer.from(
           String(
             razorpaySignature
@@ -857,22 +1007,22 @@ app.post(
           "utf8"
         );
 
-      const expectedSignature =
+      const expected =
         Buffer.from(
           generatedSignature,
           "utf8"
         );
 
-      const signaturesMatch =
-        receivedSignature.length ===
-          expectedSignature.length &&
+      const signatureValid =
+        received.length ===
+          expected.length &&
         crypto.timingSafeEqual(
-          expectedSignature,
-          receivedSignature
+          expected,
+          received
         );
 
       if (
-        !signaturesMatch
+        !signatureValid
       ) {
         return sendError(
           res,
@@ -881,10 +1031,19 @@ app.post(
         );
       }
 
+      /*
+       * Fetch payment directly
+       * from Razorpay.
+       */
+
       const payment =
         await razorpay.payments.fetch(
           razorpayPaymentId
         );
+
+      /*
+       * Verify gateway order.
+       */
 
       if (
         payment.order_id !==
@@ -897,6 +1056,10 @@ app.post(
         );
       }
 
+      /*
+       * Verify captured payment.
+       */
+
       if (
         payment.status !==
         "captured"
@@ -907,6 +1070,10 @@ app.post(
           `Payment is not captured. Current status: ${payment.status}`
         );
       }
+
+      /*
+       * Verify amount.
+       */
 
       const expectedAmount =
         Number(
@@ -930,6 +1097,11 @@ app.post(
         new Date()
           .toISOString();
 
+      /*
+       * Payment is now genuinely
+       * verified server-side.
+       */
+
       await orderRef.update({
         paymentStatus:
           "PAID",
@@ -945,7 +1117,7 @@ app.post(
         paidAt,
 
         updatedAt:
-          paidAt,
+          paidAt
       });
 
       return res.json({
@@ -957,7 +1129,7 @@ app.post(
         orderId,
 
         status:
-          "NEW",
+          "NEW"
       });
     } catch (
       error
@@ -976,9 +1148,9 @@ app.post(
   }
 );
 
-/* ==========================================
-   CUSTOMER TRACKING
-========================================== */
+/* =========================================================
+   CUSTOMER ORDER TRACKING
+   ========================================================= */
 
 app.get(
   "/api/orders/:orderId",
@@ -1023,6 +1195,14 @@ app.get(
       const order =
         snapshot.val();
 
+      /*
+       * IMPORTANT:
+       *
+       * Do not expose customer address,
+       * payment IDs or admin information
+       * through public tracking.
+       */
+
       return res.json({
         success: true,
 
@@ -1050,14 +1230,14 @@ app.get(
 
           paidAt:
             order.paidAt ||
-            null,
-        },
+            null
+        }
       });
     } catch (
       error
     ) {
       console.error(
-        "Order lookup:",
+        "Order tracking:",
         error
       );
 
@@ -1070,9 +1250,9 @@ app.get(
   }
 );
 
-/* ==========================================
+/* =========================================================
    CUSTOMER ORDER LOOKUP
-========================================== */
+   ========================================================= */
 
 app.post(
   "/api/orders/lookup",
@@ -1130,6 +1310,12 @@ app.post(
       const order =
         snapshot.val();
 
+      /*
+       * Customer must prove ownership
+       * using the phone number associated
+       * with the order.
+       */
+
       if (
         order.customer?.phone !==
         phone
@@ -1168,14 +1354,14 @@ app.post(
 
           paidAt:
             order.paidAt ||
-            null,
-        },
+            null
+        }
       });
     } catch (
       error
     ) {
       console.error(
-        "Order lookup:",
+        "Customer order lookup:",
         error
       );
 
@@ -1188,9 +1374,9 @@ app.post(
   }
 );
 
-/* ==========================================
-   ADMIN ORDER STATUSES
-========================================== */
+/* =========================================================
+   ADMIN ORDER STATUS CONFIG
+   ========================================================= */
 
 const ADMIN_ORDER_STATUSES =
   new Set([
@@ -1200,42 +1386,44 @@ const ADMIN_ORDER_STATUSES =
     "READY",
     "DISPATCHED",
     "DELIVERED",
-    "CANCELLED",
+    "CANCELLED"
   ]);
 
 const ALLOWED_STATUS_TRANSITIONS = {
   NEW: new Set([
     "ACCEPTED",
-    "CANCELLED",
+    "CANCELLED"
   ]),
 
   ACCEPTED: new Set([
     "PREPARING",
-    "CANCELLED",
+    "CANCELLED"
   ]),
 
   PREPARING: new Set([
     "READY",
-    "CANCELLED",
+    "CANCELLED"
   ]),
 
   READY: new Set([
     "DISPATCHED",
-    "CANCELLED",
+    "CANCELLED"
   ]),
 
   DISPATCHED: new Set([
-    "DELIVERED",
+    "DELIVERED"
   ]),
 
-  DELIVERED: new Set(),
+  DELIVERED:
+    new Set(),
 
-  CANCELLED: new Set(),
+  CANCELLED:
+    new Set()
 };
 
-/* ==========================================
-   ADMIN - GET ORDERS
-========================================== */
+/* =========================================================
+   ADMIN - LIST ORDERS
+   ========================================================= */
 
 app.get(
   "/api/admin/orders",
@@ -1300,7 +1488,7 @@ app.get(
 
           count: 0,
 
-          orders: [],
+          orders: []
         });
       }
 
@@ -1309,8 +1497,7 @@ app.get(
 
       let orders =
         Object.values(
-          rawOrders ||
-            {}
+          rawOrders || {}
         ).filter(
           Boolean
         );
@@ -1362,7 +1549,7 @@ app.get(
         count:
           orders.length,
 
-        orders,
+        orders
       });
     } catch (
       error
@@ -1381,9 +1568,9 @@ app.get(
   }
 );
 
-/* ==========================================
-   ADMIN - GET SINGLE ORDER
-========================================== */
+/* =========================================================
+   ADMIN - SINGLE ORDER
+   ========================================================= */
 
 app.get(
   "/api/admin/orders/:orderId",
@@ -1431,7 +1618,7 @@ app.get(
         success: true,
 
         order:
-          snapshot.val(),
+          snapshot.val()
       });
     } catch (
       error
@@ -1450,9 +1637,9 @@ app.get(
   }
 );
 
-/* ==========================================
+/* =========================================================
    ADMIN - UPDATE ORDER STATUS
-========================================== */
+   ========================================================= */
 
 app.patch(
   "/api/admin/orders/:orderId/status",
@@ -1524,6 +1711,11 @@ app.patch(
             ""
         ).toUpperCase();
 
+      /*
+       * Only genuinely paid orders
+       * can enter fulfilment.
+       */
+
       if (
         order.paymentStatus !==
         "PAID"
@@ -1548,7 +1740,7 @@ app.patch(
           orderId,
 
           status:
-            currentStatus,
+            currentStatus
         });
       }
 
@@ -1574,19 +1766,8 @@ app.patch(
         new Date()
           .toISOString();
 
-      const updateData = {
-        status:
-          nextStatus,
-
-        updatedAt:
-          now,
-
-        lastUpdatedBy:
-          req.admin.uid,
-      };
-
       /*
-       * Audit trail
+       * Create audit history.
        */
 
       const historyRef =
@@ -1608,11 +1789,26 @@ app.patch(
 
         changedBy:
           req.admin.uid,
+
+        changedByEmail:
+          req.admin.email ||
+          null
       });
 
-      await orderRef.update(
-        updateData
-      );
+      /*
+       * Update actual order.
+       */
+
+      await orderRef.update({
+        status:
+          nextStatus,
+
+        updatedAt:
+          now,
+
+        lastUpdatedBy:
+          req.admin.uid
+      });
 
       return res.json({
         success: true,
@@ -1626,13 +1822,13 @@ app.patch(
           nextStatus,
 
         updatedAt:
-          now,
+          now
       });
     } catch (
       error
     ) {
       console.error(
-        "Admin order status update:",
+        "Admin status update:",
         error
       );
 
@@ -1645,58 +1841,250 @@ app.patch(
   }
 );
 
-/* ==========================================
-   404
-========================================== */
+/* =========================================================
+   ADMIN - DASHBOARD STATS
+   ========================================================= */
 
-app.use(
-  (
+app.get(
+  "/api/admin/stats",
+  requireAdmin,
+
+  async (
     req,
     res
   ) => {
-    res.status(404).json({
-      success: false,
+    try {
+      requireFirebase();
 
-      error:
-        "Endpoint not found.",
-    });
+      const snapshot =
+        await db
+          .ref("orders")
+          .get();
+
+      const stats = {
+        total: 0,
+
+        new: 0,
+
+        accepted: 0,
+
+        preparing: 0,
+
+        ready: 0,
+
+        dispatched: 0,
+
+        delivered: 0,
+
+        cancelled: 0,
+
+        paid: 0,
+
+        pendingPayment: 0
+      };
+
+      if (
+        snapshot.exists()
+      ) {
+        const orders =
+          Object.values(
+            snapshot.val() ||
+              {}
+          );
+
+        for (
+          const order of orders
+        ) {
+          stats.total++;
+
+          const status =
+            String(
+              order.status ||
+                ""
+            ).toLowerCase();
+
+          const paymentStatus =
+            String(
+              order.paymentStatus ||
+                ""
+            ).toLowerCase();
+
+          if (
+            Object.hasOwn(
+              stats,
+              status
+            )
+          ) {
+            stats[status]++;
+          }
+
+          if (
+            paymentStatus ===
+            "paid"
+          ) {
+            stats.paid++;
+          }
+
+          if (
+            paymentStatus ===
+            "pending"
+          ) {
+            stats.pendingPayment++;
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+
+        stats
+      });
+    } catch (
+      error
+    ) {
+      console.error(
+        "Admin stats:",
+        error
+      );
+
+      return sendError(
+        res,
+        500,
+        "Unable to retrieve dashboard statistics."
+      );
+    }
   }
 );
 
-/* ==========================================
+/* =========================================================
+   ADMIN PAGE
+   ========================================================= */
+
+app.get(
+  "/admin",
+  (req, res) => {
+    res.sendFile(
+      path.join(
+        __dirname,
+        "public",
+        "admin",
+        "index.html"
+      )
+    );
+  }
+);
+
+app.get(
+  "/admin/",
+  (req, res) => {
+    res.sendFile(
+      path.join(
+        __dirname,
+        "public",
+        "admin",
+        "index.html"
+      )
+    );
+  }
+);
+
+/* =========================================================
+   API 404 HANDLER
+   ========================================================= */
+
+app.use(
+  "/api",
+  (req, res) => {
+    return sendError(
+      res,
+      404,
+      "API endpoint not found."
+    );
+  }
+);
+
+/* =========================================================
    GLOBAL ERROR HANDLER
-========================================== */
+   ========================================================= */
 
 app.use(
   (
-    err,
+    error,
     req,
     res,
     next
   ) => {
     console.error(
       "Unhandled server error:",
-      err
+      error
     );
 
-    res.status(500).json({
-      success: false,
+    if (
+      res.headersSent
+    ) {
+      return next(error);
+    }
 
-      error:
-        "Internal server error.",
-    });
+    return res
+      .status(500)
+      .json({
+        success: false,
+
+        error:
+          "Internal server error."
+      });
   }
 );
 
-/* ==========================================
+/* =========================================================
    START SERVER
-========================================== */
+   ========================================================= */
 
 app.listen(
   PORT,
+  "0.0.0.0",
   () => {
     console.log(
-      `The Swad API listening on port ${PORT}`
+      "========================================"
+    );
+
+    console.log(
+      "        THE SWAD API SERVER"
+    );
+
+    console.log(
+      "========================================"
+    );
+
+    console.log(
+      `Port: ${PORT}`
+    );
+
+    console.log(
+      `Environment: ${
+        process.env.NODE_ENV ||
+        "development"
+      }`
+    );
+
+    console.log(
+      `Firebase: ${
+        db
+          ? "READY"
+          : "NOT CONFIGURED"
+      }`
+    );
+
+    console.log(
+      `Razorpay: ${
+        razorpay
+          ? "READY"
+          : "NOT CONFIGURED"
+      }`
+    );
+
+    console.log(
+      "========================================"
     );
   }
 );
