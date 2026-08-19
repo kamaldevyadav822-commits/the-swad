@@ -1,24 +1,13 @@
 services:
-  # Customer frontend
   - type: web
-    name: the-swad-frontend
-    runtime: static
-    buildCommand: ""
-    staticPublishPath: ./public
-    autoDeploy: true
-
-    routes:
-      - type: rewrite
-        source: /*
-        destination: /index.html
-
-  # API / payment / Firebase server
-  - type: web
-    name: the-swad-api
+    name: the-swad
     runtime: node
-    rootDir: .
-    buildCommand: npm ci
+
+    buildCommand: npm install
     startCommand: npm start
+
+    healthCheckPath: /api/health
+
     autoDeploy: true
 
     envVars:
@@ -28,23 +17,17 @@ services:
       - key: PORT
         value: 10000
 
-      # Set this in Render after the frontend URL is created.
       - key: CLIENT_ORIGIN
-        sync: false
+        value: "*"
 
-      # Razorpay credentials — add as secret values in Render.
       - key: RAZORPAY_KEY_ID
         sync: false
 
       - key: RAZORPAY_KEY_SECRET
         sync: false
 
-      # Firebase Admin service account JSON — secret.
       - key: FIREBASE_SERVICE_ACCOUNT_JSON
         sync: false
 
       - key: FIREBASE_DATABASE_URL
         sync: false
-
-    healthCheckPath: /api/health
-    autoDeploy: true
