@@ -4,33 +4,26 @@ import dotenv from "dotenv";
 dotenv.config();
 
 /*
-==========================================================
-THE SWAD — MAKE FIREBASE USER ADMIN
-==========================================================
+============================================================
+THE SWAD
+ADMIN CLAIM SETUP
+============================================================
 
-Usage:
+Purpose:
+Make one Firebase Authentication user an administrator.
 
-ADMIN_EMAIL=your@email.com node scripts/make-admin.js
+This script must NEVER be inside public/.
 
-This script:
+It runs only in a trusted Node.js environment.
 
-1. Connects to Firebase Admin SDK
-2. Finds the Firebase Authentication user
-3. Adds the custom claim:
+It adds:
 
-   {
-     "admin": true
-   }
+{
+  admin: true
+}
 
-4. Does NOT expose your Firebase private key
-5. Does NOT run inside the browser
-
-IMPORTANT:
-Run this ONLY on your trusted local machine
-or a secure server environment.
-
-Never put this script inside public/.
-==========================================================
+to the Firebase user's custom claims.
+============================================================
 */
 
 function fail(message) {
@@ -38,93 +31,121 @@ function fail(message) {
   process.exit(1);
 }
 
-/* -------------------------------------------------------
-   Validate environment
-------------------------------------------------------- */
+/* ----------------------------------------------------------
+   Read admin email
 
-if (!process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
+   ADMIN_EMAIL is intentionally used only when running
+   this script. It does not need to be a permanent
+   production environment variable.
+---------------------------------------------------------- */
+
+const email =
+  process.env.ADMIN_EMAIL
+    ?.trim()
+    .toLowerCase();
+
+if (!email) {
   fail(
-    "FIREBASE_SERVICE_ACCOUNT_JSON is missing from .env"
+    "ADMIN_EMAIL is missing.\n\n" +
+    "Example:\n" +
+    "ADMIN_EMAIL=your@email.com node scripts/make-admin.js"
   );
 }
 
-if (!process.env.ADMIN_EMAIL) {
+if (!email.includes("@")) {
   fail(
-    "ADMIN_EMAIL is missing.\n\nExample:\nADMIN_EMAIL=admin@example.com"
+    "ADMIN_EMAIL does not appear to be valid."
   );
 }
 
-/* -------------------------------------------------------
-   Initialize Firebase Admin
-------------------------------------------------------- */
+/* ----------------------------------------------------------
+   Firebase service account
+---------------------------------------------------------- */
+
+const serviceAccountJSON =
+  process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+if (!serviceAccountJSON) {
+  fail(
+    "FIREBASE_SERVICE_ACCOUNT_JSON is missing."
+  );
+}
 
 let serviceAccount;
 
 try {
-  serviceAccount = JSON.parse(
-    process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-  );
+  serviceAccount =
+    JSON.parse(
+      serviceAccountJSON
+    );
 } catch (error) {
   fail(
     "FIREBASE_SERVICE_ACCOUNT_JSON is not valid JSON."
   );
 }
 
+/* ----------------------------------------------------------
+   Initialize Firebase Admin
+---------------------------------------------------------- */
+
 try {
+
   if (!admin.apps.length) {
+
     admin.initializeApp({
       credential:
-        admin.credential.cert(serviceAccount),
-
-      databaseURL:
-        process.env.FIREBASE_DATABASE_URL,
+        admin.credential.cert(
+          serviceAccount
+        )
     });
+
   }
+
 } catch (error) {
+
   fail(
     `Firebase initialization failed: ${error.message}`
   );
+
 }
 
-/* -------------------------------------------------------
-   Find user
-------------------------------------------------------- */
-
-const email =
-  process.env.ADMIN_EMAIL
-    .trim()
-    .toLowerCase();
-
-if (!email.includes("@")) {
-  fail(
-    "ADMIN_EMAIL does not appear to be a valid email."
-  );
-}
+/* ----------------------------------------------------------
+   Find Firebase Authentication user
+---------------------------------------------------------- */
 
 try {
+
   console.log(
-    `\nLooking for Firebase user: ${email}`
+    `\nSearching Firebase Authentication for: ${email}`
   );
 
   const user =
     await admin
       .auth()
-      .getUserByEmail(email);
+      .getUserByEmail(
+        email
+      );
 
   console.log(
-    `Firebase user found: ${user.uid}`
+    `✓ User found`
   );
 
-  /* -----------------------------------------------------
-     Preserve existing claims
-  ----------------------------------------------------- */
+  console.log(
+    `UID: ${user.uid}`
+  );
+
+
+  /* --------------------------------------------------------
+     Preserve existing custom claims
+  -------------------------------------------------------- */
 
   const existingClaims =
     user.customClaims || {};
 
-  /* -----------------------------------------------------
-     Add admin claim
-  ----------------------------------------------------- */
+
+  /* --------------------------------------------------------
+     Add administrator claim
+  -------------------------------------------------------- */
 
   await admin
     .auth()
@@ -132,12 +153,26 @@ try {
       user.uid,
       {
         ...existingClaims,
-        admin: true,
+
+        admin: true
       }
     );
 
+
+  /* --------------------------------------------------------
+     Success
+  -------------------------------------------------------- */
+
   console.log(
-    "\n✅ ADMIN ACCESS ENABLED"
+    "\n========================================"
+  );
+
+  console.log(
+    "       THE SWAD ADMIN ENABLED"
+  );
+
+  console.log(
+    "========================================"
   );
 
   console.log(
@@ -155,7 +190,7 @@ try {
   console.log(
     JSON.stringify(
       {
-        admin: true,
+        admin: true
       },
       null,
       2
@@ -163,30 +198,24 @@ try {
   );
 
   console.log(
+    "\n✓ Admin access has been assigned."
+  );
+
+  console.log(
     "\nIMPORTANT:"
   );
 
   console.log(
-    "The user must sign out and sign in again,"
+    "Sign out and sign in again in the Admin Dashboard."
   );
 
   console.log(
-    "or refresh their Firebase ID token,"
+    "This refreshes the Firebase ID token and loads the new claim."
   );
 
   console.log(
-    "before the new admin claim is available."
+    "========================================\n"
   );
-
-  console.log(
-    "\nThe Swad admin dashboard can now verify"
-  );
-
-  console.log(
-    "this account through the backend."
-  );
-
-  console.log("");
 
   process.exit(0);
 
@@ -196,12 +225,17 @@ try {
     error.code ===
     "auth/user-not-found"
   ) {
+
     fail(
-      `No Firebase Authentication user exists for ${email}.\n\nCreate the user first in:\nFirebase Console → Authentication → Users`
+      `Firebase Authentication user not found: ${email}\n\n` +
+      "Create this user first in:\n" +
+      "Firebase Console → Authentication → Users"
     );
+
   }
 
   fail(
-    `Unable to make user admin: ${error.message}`
+    `Unable to assign admin access: ${error.message}`
   );
+
 }
