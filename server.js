@@ -14,7 +14,7 @@ dotenv.config();
 
 /* =========================================================
    THE SWAD
-   Production Node.js API + Customer/Admin Web Server
+   Firestore + Razorpay Production Server
    ========================================================= */
 
 const app = express();
@@ -25,7 +25,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /* =========================================================
-   CONFIGURATION
+   CONFIG
    ========================================================= */
 
 const CLIENT_ORIGIN =
@@ -36,11 +36,11 @@ const ALLOWED_ORIGINS =
     ? null
     : CLIENT_ORIGIN
         .split(",")
-        .map((origin) => origin.trim())
+        .map((x) => x.trim())
         .filter(Boolean);
 
 /* =========================================================
-   EXPRESS SECURITY
+   SECURITY
    ========================================================= */
 
 app.set("trust proxy", 1);
@@ -55,25 +55,10 @@ app.use(
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      /*
-       * Requests without Origin can be:
-       * - same-origin
-       * - health checks
-       * - server tools
-       */
-
+    origin(origin, callback) {
       if (!origin) {
         return callback(null, true);
       }
-
-      /*
-       * If no explicit origin has been configured,
-       * allow the request.
-       *
-       * For production you can set CLIENT_ORIGIN
-       * to your exact Render/custom domain.
-       */
 
       if (!ALLOWED_ORIGINS) {
         return callback(null, true);
@@ -114,16 +99,12 @@ app.use(
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-
   limit: 200,
-
   standardHeaders: "draft-7",
-
   legacyHeaders: false,
 
   message: {
     success: false,
-
     error:
       "Too many requests. Please try again later."
   }
@@ -131,16 +112,12 @@ const apiLimiter = rateLimit({
 
 const paymentLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-
   limit: 30,
-
   standardHeaders: "draft-7",
-
   legacyHeaders: false,
 
   message: {
     success: false,
-
     error:
       "Too many payment requests. Please try again later."
   }
@@ -152,50 +129,41 @@ app.use(
 );
 
 /* =========================================================
-   FIREBASE ADMIN INITIALIZATION
+   FIREBASE ADMIN / FIRESTORE
    ========================================================= */
 
 let db = null;
 
 try {
   const serviceAccountJSON =
-    process.env
-      .FIREBASE_SERVICE_ACCOUNT_JSON;
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
-  const databaseURL =
-    process.env
-      .FIREBASE_DATABASE_URL;
-
-  if (
-    serviceAccountJSON &&
-    databaseURL
-  ) {
-    const serviceAccount =
-      JSON.parse(
-        serviceAccountJSON
-      );
-
-    if (!admin.apps.length) {
-      admin.initializeApp({
-        credential:
-          admin.credential.cert(
-            serviceAccount
-          ),
-
-        databaseURL
-      });
-    }
-
-    db = admin.database();
-
-    console.log(
-      "✓ Firebase Admin initialized"
-    );
-  } else {
-    console.warn(
-      "⚠ Firebase environment variables are not configured."
+  if (!serviceAccountJSON) {
+    throw new Error(
+      "FIREBASE_SERVICE_ACCOUNT_JSON is missing."
     );
   }
+
+  const serviceAccount =
+    JSON.parse(
+      serviceAccountJSON
+    );
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential:
+        admin.credential.cert(
+          serviceAccount
+        )
+    });
+  }
+
+  db = admin.firestore();
+
+  console.log(
+    "✓ Firebase Admin + Firestore initialized"
+  );
+
 } catch (error) {
   console.error(
     "Firebase initialization failed:",
@@ -204,16 +172,14 @@ try {
 }
 
 /* =========================================================
-   RAZORPAY INITIALIZATION
+   RAZORPAY
    ========================================================= */
 
 const RAZORPAY_KEY_ID =
-  process.env
-    .RAZORPAY_KEY_ID;
+  process.env.RAZORPAY_KEY_ID;
 
 const RAZORPAY_KEY_SECRET =
-  process.env
-    .RAZORPAY_KEY_SECRET;
+  process.env.RAZORPAY_KEY_SECRET;
 
 let razorpay = null;
 
@@ -235,17 +201,16 @@ if (
   );
 } else {
   console.warn(
-    "⚠ Razorpay environment variables are not configured."
+    "⚠ Razorpay environment variables are missing."
   );
 }
 
 /* =========================================================
-   BUSINESS CONFIGURATION
+   BUSINESS
    ========================================================= */
 
 const BUSINESS = {
   name: "The Swad",
-
   currency: "INR",
 
   deliveryFee: 30,
@@ -254,114 +219,71 @@ const BUSINESS = {
 };
 
 /* =========================================================
-   SERVER-SIDE MENU
-   =========================================================
-
-   IMPORTANT:
-
-   Prices in the browser are NEVER trusted.
-
-   The server calculates the actual order amount
-   from this catalogue.
-
-   Replace these products/prices with your actual
-   The Swad menu before going live.
+   MENU
    ========================================================= */
 
 const MENU = {
   "special-full-tiffin": {
     id: "special-full-tiffin",
-
     name: "Special Full Tiffin",
-
     category: "Tiffin",
-
     price: 99,
-
     available: true
   },
 
   "mini-tiffin": {
     id: "mini-tiffin",
-
     name: "Mini Tiffin",
-
     category: "Tiffin",
-
     price: 69,
-
     available: true
   },
 
   "veg-thali": {
     id: "veg-thali",
-
     name: "Homestyle Veg Thali",
-
     category: "Tiffin",
-
     price: 119,
-
     available: true
   },
 
   "lunch-combo": {
     id: "lunch-combo",
-
     name: "Lunch Combo",
-
     category: "Combos",
-
     price: 129,
-
     available: true
   },
 
   "aloo-paratha": {
     id: "aloo-paratha",
-
     name: "Aloo Paratha",
-
     category: "Breakfast",
-
     price: 59,
-
     available: true
   },
 
   "dal-rice": {
     id: "dal-rice",
-
     name: "Dal Rice",
-
     category: "Lunch",
-
     price: 79,
-
     available: true
   },
 
   "roti-sabzi": {
     id: "roti-sabzi",
-
     name: "Roti Sabzi",
-
     category: "Lunch",
-
     price: 75,
-
     available: true
   },
 
   "paneer-combo": {
     id: "paneer-combo",
-
     name: "Paneer Special Combo",
-
     category: "Combos",
-
     price: 149,
-
     available: true
   }
 };
@@ -375,12 +297,10 @@ function sendError(
   status,
   message
 ) {
-  return res
-    .status(status)
-    .json({
-      success: false,
-      error: message
-    });
+  return res.status(status).json({
+    success: false,
+    error: message
+  });
 }
 
 function sanitizeText(
@@ -417,7 +337,7 @@ function validatePincode(
 function requireFirebase() {
   if (!db) {
     throw new Error(
-      "Firebase is not configured on the server."
+      "Firestore is not configured."
     );
   }
 }
@@ -425,9 +345,24 @@ function requireFirebase() {
 function requireRazorpay() {
   if (!razorpay) {
     throw new Error(
-      "Razorpay is not configured on the server."
+      "Razorpay is not configured."
     );
   }
+}
+
+function makeOrderId() {
+  const timestamp =
+    Date.now()
+      .toString(36)
+      .toUpperCase();
+
+  const random =
+    crypto
+      .randomBytes(4)
+      .toString("hex")
+      .toUpperCase();
+
+  return `SWAD-${timestamp}-${random}`;
 }
 
 /* =========================================================
@@ -518,7 +453,7 @@ function validateCustomer(
 }
 
 /* =========================================================
-   ORDER CALCULATION
+   SERVER-SIDE ORDER CALCULATION
    ========================================================= */
 
 function calculateOrder(
@@ -588,20 +523,11 @@ function calculateOrder(
       quantity;
 
     normalizedItems.push({
-      id:
-        product.id,
-
-      name:
-        product.name,
-
-      category:
-        product.category,
-
+      id: product.id,
+      name: product.name,
+      category: product.category,
       quantity,
-
-      unitPrice:
-        product.price,
-
+      unitPrice: product.price,
       lineTotal
     });
 
@@ -635,26 +561,7 @@ function calculateOrder(
 }
 
 /* =========================================================
-   ORDER ID
-   ========================================================= */
-
-function makeOrderId() {
-  const timestamp =
-    Date.now()
-      .toString(36)
-      .toUpperCase();
-
-  const random =
-    crypto
-      .randomBytes(4)
-      .toString("hex")
-      .toUpperCase();
-
-  return `SWAD-${timestamp}-${random}`;
-}
-
-/* =========================================================
-   STATIC CUSTOMER WEBSITE
+   STATIC FILES
    ========================================================= */
 
 app.use(
@@ -672,7 +579,7 @@ app.use(
 );
 
 /* =========================================================
-   HEALTH CHECK
+   HEALTH
    ========================================================= */
 
 app.get(
@@ -688,25 +595,26 @@ app.get(
         "online",
 
       environment:
-        process.env
-          .NODE_ENV ||
+        process.env.NODE_ENV ||
         "development",
 
       firebase:
+        Boolean(db),
+
+      firestore:
         Boolean(db),
 
       razorpay:
         Boolean(razorpay),
 
       timestamp:
-        new Date()
-          .toISOString()
+        new Date().toISOString()
     });
   }
 );
 
 /* =========================================================
-   MENU API
+   MENU
    ========================================================= */
 
 app.get(
@@ -728,9 +636,7 @@ app.get(
         BUSINESS.freeDeliveryMinimum,
 
       items:
-        Object.values(
-          MENU
-        )
+        Object.values(MENU)
     });
   }
 );
@@ -749,7 +655,6 @@ app.post(
   ) => {
     try {
       requireRazorpay();
-
       requireFirebase();
 
       const customer =
@@ -765,40 +670,28 @@ app.post(
       const orderId =
         makeOrderId();
 
-      /*
-       * Razorpay amount is always
-       * represented in the smallest
-       * currency unit.
-       *
-       * INR ₹99 = 9900 paise.
-       */
-
       const razorpayOrder =
-        await razorpay.orders.create(
-          {
-            amount:
-              calculation.total *
-              100,
+        await razorpay.orders.create({
+          amount:
+            calculation.total * 100,
 
-            currency:
-              "INR",
+          currency:
+            "INR",
 
-            receipt:
-              orderId,
+          receipt:
+            orderId,
 
-            notes: {
-              business:
-                BUSINESS.name,
+          notes: {
+            business:
+              BUSINESS.name,
 
-              internalOrderId:
-                orderId
-            }
+            internalOrderId:
+              orderId
           }
-        );
+        });
 
       const now =
-        new Date()
-          .toISOString();
+        new Date().toISOString();
 
       const pendingOrder = {
         orderId,
@@ -837,9 +730,8 @@ app.post(
       };
 
       await db
-        .ref(
-          `orders/${orderId}`
-        )
+        .collection("orders")
+        .doc(orderId)
         .set(
           pendingOrder
         );
@@ -864,9 +756,8 @@ app.post(
         keyId:
           RAZORPAY_KEY_ID
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Create payment order:",
         error
@@ -896,7 +787,6 @@ app.post(
   ) => {
     try {
       requireRazorpay();
-
       requireFirebase();
 
       const {
@@ -921,15 +811,15 @@ app.post(
       }
 
       const orderRef =
-        db.ref(
-          `orders/${orderId}`
-        );
+        db
+          .collection("orders")
+          .doc(orderId);
 
       const snapshot =
         await orderRef.get();
 
       if (
-        !snapshot.exists()
+        !snapshot.exists
       ) {
         return sendError(
           res,
@@ -939,13 +829,7 @@ app.post(
       }
 
       const order =
-        snapshot.val();
-
-      /*
-       * Prevent a payment belonging
-       * to another Razorpay order from
-       * being attached to this order.
-       */
+        snapshot.data();
 
       if (
         order.razorpayOrderId !==
@@ -959,9 +843,7 @@ app.post(
       }
 
       /*
-       * Idempotency:
-       * If this order was already verified,
-       * do not create a duplicate state change.
+       * Idempotency.
        */
 
       if (
@@ -971,8 +853,7 @@ app.post(
         return res.json({
           success: true,
 
-          verified:
-            true,
+          verified: true,
 
           alreadyVerified:
             true,
@@ -1032,18 +913,13 @@ app.post(
       }
 
       /*
-       * Fetch payment directly
-       * from Razorpay.
+       * Fetch payment from Razorpay.
        */
 
       const payment =
         await razorpay.payments.fetch(
           razorpayPaymentId
         );
-
-      /*
-       * Verify gateway order.
-       */
 
       if (
         payment.order_id !==
@@ -1056,10 +932,6 @@ app.post(
         );
       }
 
-      /*
-       * Verify captured payment.
-       */
-
       if (
         payment.status !==
         "captured"
@@ -1070,10 +942,6 @@ app.post(
           `Payment is not captured. Current status: ${payment.status}`
         );
       }
-
-      /*
-       * Verify amount.
-       */
 
       const expectedAmount =
         Number(
@@ -1094,46 +962,98 @@ app.post(
       }
 
       const paidAt =
-        new Date()
-          .toISOString();
+        new Date().toISOString();
 
       /*
-       * Payment is now genuinely
-       * verified server-side.
+       * Firestore transaction prevents
+       * duplicate verification updates.
        */
 
-      await orderRef.update({
-        paymentStatus:
-          "PAID",
+      await db.runTransaction(
+        async (transaction) => {
+          const latest =
+            await transaction.get(
+              orderRef
+            );
 
-        status:
-          "NEW",
+          if (
+            !latest.exists
+          ) {
+            throw new Error(
+              "Order no longer exists."
+            );
+          }
 
-        razorpayPaymentId,
+          const latestOrder =
+            latest.data();
 
-        razorpaySignatureVerified:
-          true,
+          if (
+            latestOrder.paymentStatus ===
+            "PAID"
+          ) {
+            return;
+          }
 
-        paidAt,
+          transaction.update(
+            orderRef,
+            {
+              paymentStatus:
+                "PAID",
 
-        updatedAt:
-          paidAt
-      });
+              status:
+                "NEW",
+
+              razorpayPaymentId,
+
+              razorpaySignatureVerified:
+                true,
+
+              paidAt,
+
+              updatedAt:
+                paidAt
+            }
+          );
+
+          transaction.set(
+            orderRef
+              .collection(
+                "paymentEvents"
+              )
+              .doc(),
+            {
+              type:
+                "PAYMENT_VERIFIED",
+
+              razorpayOrderId,
+
+              razorpayPaymentId,
+
+              amount:
+                payment.amount,
+
+              currency:
+                payment.currency,
+
+              createdAt:
+                paidAt
+            }
+          );
+        }
+      );
 
       return res.json({
         success: true,
 
-        verified:
-          true,
+        verified: true,
 
         orderId,
 
         status:
           "NEW"
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Payment verification:",
         error
@@ -1177,13 +1097,12 @@ app.get(
 
       const snapshot =
         await db
-          .ref(
-            `orders/${orderId}`
-          )
+          .collection("orders")
+          .doc(orderId)
           .get();
 
       if (
-        !snapshot.exists()
+        !snapshot.exists
       ) {
         return sendError(
           res,
@@ -1193,14 +1112,11 @@ app.get(
       }
 
       const order =
-        snapshot.val();
+        snapshot.data();
 
       /*
-       * IMPORTANT:
-       *
-       * Do not expose customer address,
-       * payment IDs or admin information
-       * through public tracking.
+       * Only safe tracking information
+       * is exposed.
        */
 
       return res.json({
@@ -1233,9 +1149,8 @@ app.get(
             null
         }
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Order tracking:",
         error
@@ -1279,9 +1194,7 @@ app.post(
 
       if (
         !orderId ||
-        !validatePhone(
-          phone
-        )
+        !validatePhone(phone)
       ) {
         return sendError(
           res,
@@ -1292,13 +1205,12 @@ app.post(
 
       const snapshot =
         await db
-          .ref(
-            `orders/${orderId}`
-          )
+          .collection("orders")
+          .doc(orderId)
           .get();
 
       if (
-        !snapshot.exists()
+        !snapshot.exists
       ) {
         return sendError(
           res,
@@ -1308,13 +1220,7 @@ app.post(
       }
 
       const order =
-        snapshot.val();
-
-      /*
-       * Customer must prove ownership
-       * using the phone number associated
-       * with the order.
-       */
+        snapshot.data();
 
       if (
         order.customer?.phone !==
@@ -1357,9 +1263,8 @@ app.post(
             null
         }
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Customer order lookup:",
         error
@@ -1375,7 +1280,7 @@ app.post(
 );
 
 /* =========================================================
-   ADMIN ORDER STATUS CONFIG
+   ADMIN STATUS CONFIG
    ========================================================= */
 
 const ADMIN_ORDER_STATUSES =
@@ -1445,8 +1350,7 @@ app.get(
 
       const requestedLimit =
         Number(
-          req.query.limit ||
-            50
+          req.query.limit || 50
         );
 
       const limit =
@@ -1475,31 +1379,34 @@ app.get(
         );
       }
 
+      /*
+       * Simple server-side query.
+       * Sorting is done in JS so the first
+       * version doesn't require a Firestore
+       * composite index.
+       */
+
       const snapshot =
         await db
-          .ref("orders")
+          .collection("orders")
           .get();
 
       if (
-        !snapshot.exists()
+        snapshot.empty
       ) {
         return res.json({
           success: true,
-
           count: 0,
-
           orders: []
         });
       }
 
-      const rawOrders =
-        snapshot.val();
-
       let orders =
-        Object.values(
-          rawOrders || {}
-        ).filter(
-          Boolean
+        snapshot.docs.map(
+          (doc) => ({
+            id: doc.id,
+            ...doc.data()
+          })
         );
 
       if (
@@ -1509,8 +1416,7 @@ app.get(
           orders.filter(
             (order) =>
               String(
-                order.status ||
-                  ""
+                order.status || ""
               ).toUpperCase() ===
               requestedStatus
           );
@@ -1520,14 +1426,12 @@ app.get(
         (a, b) => {
           const aTime =
             Date.parse(
-              a.createdAt ||
-                ""
+              a.createdAt || ""
             ) || 0;
 
           const bTime =
             Date.parse(
-              b.createdAt ||
-                ""
+              b.createdAt || ""
             ) || 0;
 
           return (
@@ -1551,9 +1455,8 @@ app.get(
 
         orders
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Admin order list:",
         error
@@ -1599,13 +1502,12 @@ app.get(
 
       const snapshot =
         await db
-          .ref(
-            `orders/${orderId}`
-          )
+          .collection("orders")
+          .doc(orderId)
           .get();
 
       if (
-        !snapshot.exists()
+        !snapshot.exists
       ) {
         return sendError(
           res,
@@ -1614,15 +1516,41 @@ app.get(
         );
       }
 
+      const historySnapshot =
+        await db
+          .collection("orders")
+          .doc(orderId)
+          .collection(
+            "statusHistory"
+          )
+          .orderBy(
+            "changedAt",
+            "desc"
+          )
+          .limit(50)
+          .get();
+
+      const statusHistory =
+        historySnapshot.docs.map(
+          (doc) => ({
+            id: doc.id,
+            ...doc.data()
+          })
+        );
+
       return res.json({
         success: true,
 
-        order:
-          snapshot.val()
+        order: {
+          id: snapshot.id,
+
+          ...snapshot.data(),
+
+          statusHistory
+        }
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Admin order detail:",
         error
@@ -1638,7 +1566,7 @@ app.get(
 );
 
 /* =========================================================
-   ADMIN - UPDATE ORDER STATUS
+   ADMIN - UPDATE STATUS
    ========================================================= */
 
 app.patch(
@@ -1685,51 +1613,139 @@ app.patch(
       }
 
       const orderRef =
-        db.ref(
-          `orders/${orderId}`
+        db
+          .collection("orders")
+          .doc(orderId);
+
+      const result =
+        await db.runTransaction(
+          async (transaction) => {
+            const snapshot =
+              await transaction.get(
+                orderRef
+              );
+
+            if (
+              !snapshot.exists
+            ) {
+              throw new Error(
+                "ORDER_NOT_FOUND"
+              );
+            }
+
+            const order =
+              snapshot.data();
+
+            const currentStatus =
+              String(
+                order.status || ""
+              ).toUpperCase();
+
+            if (
+              order.paymentStatus !==
+              "PAID"
+            ) {
+              throw new Error(
+                "ORDER_NOT_PAID"
+              );
+            }
+
+            if (
+              currentStatus ===
+              nextStatus
+            ) {
+              return {
+                already:
+                  true,
+
+                previous:
+                  currentStatus,
+
+                status:
+                  currentStatus
+              };
+            }
+
+            const allowedNext =
+              ALLOWED_STATUS_TRANSITIONS[
+                currentStatus
+              ];
+
+            if (
+              !allowedNext ||
+              !allowedNext.has(
+                nextStatus
+              )
+            ) {
+              throw new Error(
+                "INVALID_TRANSITION"
+              );
+            }
+
+            const now =
+              new Date()
+                .toISOString();
+
+            const historyRef =
+              orderRef
+                .collection(
+                  "statusHistory"
+                )
+                .doc();
+
+            transaction.set(
+              historyRef,
+              {
+                from:
+                  currentStatus,
+
+                to:
+                  nextStatus,
+
+                changedAt:
+                  now,
+
+                changedBy:
+                  req.admin.uid,
+
+                changedByEmail:
+                  req.admin.email ||
+                  null
+              }
+            );
+
+            transaction.update(
+              orderRef,
+              {
+                status:
+                  nextStatus,
+
+                updatedAt:
+                  now,
+
+                lastUpdatedBy:
+                  req.admin.uid
+              }
+            );
+
+            return {
+              already:
+                false,
+
+              previous:
+                currentStatus,
+
+              status:
+                nextStatus,
+
+              updatedAt:
+                now
+            };
+          }
         );
 
-      const snapshot =
-        await orderRef.get();
-
       if (
-        !snapshot.exists()
-      ) {
-        return sendError(
-          res,
-          404,
-          "Order not found."
-        );
-      }
-
-      const order =
-        snapshot.val();
-
-      const currentStatus =
-        String(
-          order.status ||
-            ""
-        ).toUpperCase();
-
-      /*
-       * Only genuinely paid orders
-       * can enter fulfilment.
-       */
-
-      if (
-        order.paymentStatus !==
-        "PAID"
-      ) {
-        return sendError(
-          res,
-          409,
-          "Only paid orders can be processed."
-        );
-      }
-
-      if (
-        currentStatus ===
-        nextStatus
+        result.already
       ) {
         return res.json({
           success: true,
@@ -1740,75 +1756,9 @@ app.patch(
           orderId,
 
           status:
-            currentStatus
+            result.status
         });
       }
-
-      const allowedNext =
-        ALLOWED_STATUS_TRANSITIONS[
-          currentStatus
-        ];
-
-      if (
-        !allowedNext ||
-        !allowedNext.has(
-          nextStatus
-        )
-      ) {
-        return sendError(
-          res,
-          409,
-          `Invalid status transition: ${currentStatus} → ${nextStatus}`
-        );
-      }
-
-      const now =
-        new Date()
-          .toISOString();
-
-      /*
-       * Create audit history.
-       */
-
-      const historyRef =
-        orderRef
-          .child(
-            "statusHistory"
-          )
-          .push();
-
-      await historyRef.set({
-        from:
-          currentStatus,
-
-        to:
-          nextStatus,
-
-        changedAt:
-          now,
-
-        changedBy:
-          req.admin.uid,
-
-        changedByEmail:
-          req.admin.email ||
-          null
-      });
-
-      /*
-       * Update actual order.
-       */
-
-      await orderRef.update({
-        status:
-          nextStatus,
-
-        updatedAt:
-          now,
-
-        lastUpdatedBy:
-          req.admin.uid
-      });
 
       return res.json({
         success: true,
@@ -1816,21 +1766,53 @@ app.patch(
         orderId,
 
         previousStatus:
-          currentStatus,
+          result.previous,
 
         status:
-          nextStatus,
+          result.status,
 
         updatedAt:
-          now
+          result.updatedAt
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Admin status update:",
         error
       );
+
+      if (
+        error.message ===
+        "ORDER_NOT_FOUND"
+      ) {
+        return sendError(
+          res,
+          404,
+          "Order not found."
+        );
+      }
+
+      if (
+        error.message ===
+        "ORDER_NOT_PAID"
+      ) {
+        return sendError(
+          res,
+          409,
+          "Only paid orders can be processed."
+        );
+      }
+
+      if (
+        error.message ===
+        "INVALID_TRANSITION"
+      ) {
+        return sendError(
+          res,
+          409,
+          "Invalid order status transition."
+        );
+      }
 
       return sendError(
         res,
@@ -1858,7 +1840,7 @@ app.get(
 
       const snapshot =
         await db
-          .ref("orders")
+          .collection("orders")
           .get();
 
       const stats = {
@@ -1883,54 +1865,46 @@ app.get(
         pendingPayment: 0
       };
 
-      if (
-        snapshot.exists()
+      for (
+        const doc of snapshot.docs
       ) {
-        const orders =
-          Object.values(
-            snapshot.val() ||
-              {}
-          );
+        const order =
+          doc.data();
 
-        for (
-          const order of orders
+        stats.total++;
+
+        const status =
+          String(
+            order.status || ""
+          ).toLowerCase();
+
+        const paymentStatus =
+          String(
+            order.paymentStatus ||
+              ""
+          ).toLowerCase();
+
+        if (
+          Object.hasOwn(
+            stats,
+            status
+          )
         ) {
-          stats.total++;
+          stats[status]++;
+        }
 
-          const status =
-            String(
-              order.status ||
-                ""
-            ).toLowerCase();
+        if (
+          paymentStatus ===
+          "paid"
+        ) {
+          stats.paid++;
+        }
 
-          const paymentStatus =
-            String(
-              order.paymentStatus ||
-                ""
-            ).toLowerCase();
-
-          if (
-            Object.hasOwn(
-              stats,
-              status
-            )
-          ) {
-            stats[status]++;
-          }
-
-          if (
-            paymentStatus ===
-            "paid"
-          ) {
-            stats.paid++;
-          }
-
-          if (
-            paymentStatus ===
-            "pending"
-          ) {
-            stats.pendingPayment++;
-          }
+        if (
+          paymentStatus ===
+          "pending"
+        ) {
+          stats.pendingPayment++;
         }
       }
 
@@ -1939,9 +1913,8 @@ app.get(
 
         stats
       });
-    } catch (
-      error
-    ) {
+
+    } catch (error) {
       console.error(
         "Admin stats:",
         error
@@ -1989,7 +1962,7 @@ app.get(
 );
 
 /* =========================================================
-   API 404 HANDLER
+   API 404
    ========================================================= */
 
 app.use(
@@ -2037,7 +2010,7 @@ app.use(
 );
 
 /* =========================================================
-   START SERVER
+   START
    ========================================================= */
 
 app.listen(
@@ -2049,7 +2022,7 @@ app.listen(
     );
 
     console.log(
-      "        THE SWAD API SERVER"
+      "          THE SWAD SERVER"
     );
 
     console.log(
@@ -2068,7 +2041,7 @@ app.listen(
     );
 
     console.log(
-      `Firebase: ${
+      `Firestore: ${
         db
           ? "READY"
           : "NOT CONFIGURED"
