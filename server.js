@@ -72,7 +72,8 @@ app.use(
 
     allowedHeaders: [
       "Content-Type",
-      "Authorization"
+      "Authorization",
+      "x-admin-setup-token"
     ]
   })
 );
@@ -113,6 +114,7 @@ app.use(
 let db = null;
 
 try {
+
   const raw =
     process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
@@ -141,10 +143,12 @@ try {
   );
 
 } catch (error) {
+
   console.error(
     "Firebase initialization failed:",
     error.message
   );
+
 }
 
 /* ============================================================
@@ -163,6 +167,7 @@ if (
   RAZORPAY_KEY_ID &&
   RAZORPAY_KEY_SECRET
 ) {
+
   razorpay =
     new Razorpay({
       key_id:
@@ -177,9 +182,11 @@ if (
   );
 
 } else {
+
   console.warn(
     "⚠ Razorpay environment variables are missing."
   );
+
 }
 
 /* ============================================================
@@ -275,6 +282,7 @@ const MENU = {
     price: 149,
     available: true
   }
+
 };
 
 /* ============================================================
@@ -286,6 +294,7 @@ function sendError(
   status,
   message
 ) {
+
   return res
     .status(status)
     .json({
@@ -299,11 +308,14 @@ function text(
   value,
   maxLength
 ) {
+
   if (
     typeof value !==
     "string"
   ) {
+
     return "";
+
   }
 
   return value
@@ -318,40 +330,53 @@ function text(
 function validPhone(
   phone
 ) {
+
   return /^[6-9]\d{9}$/.test(
     phone
   );
+
 }
 
 
 function validPincode(
   pincode
 ) {
+
   return /^[1-9]\d{5}$/.test(
     pincode
   );
+
 }
 
 
 function requireFirebase() {
+
   if (!db) {
+
     throw new Error(
       "Firestore is not configured."
     );
+
   }
+
 }
 
 
 function requireRazorpay() {
+
   if (!razorpay) {
+
     throw new Error(
       "Razorpay is not configured."
     );
+
   }
+
 }
 
 
 function makeOrderId() {
+
   return (
     "SWAD-" +
     Date.now()
@@ -363,6 +388,7 @@ function makeOrderId() {
       .toString("hex")
       .toUpperCase()
   );
+
 }
 
 /* ============================================================
@@ -372,6 +398,7 @@ function makeOrderId() {
 function validateCustomer(
   customer
 ) {
+
   const value = {
 
     name:
@@ -409,15 +436,18 @@ function validateCustomer(
         customer?.notes,
         200
       )
+
   };
 
 
   if (
     value.name.length < 2
   ) {
+
     throw new Error(
       "Invalid customer name."
     );
+
   }
 
 
@@ -426,18 +456,22 @@ function validateCustomer(
       value.phone
     )
   ) {
+
     throw new Error(
       "Invalid mobile number."
     );
+
   }
 
 
   if (
     value.address.length < 8
   ) {
+
     throw new Error(
       "Invalid delivery address."
     );
+
   }
 
 
@@ -446,13 +480,16 @@ function validateCustomer(
       value.pincode
     )
   ) {
+
     throw new Error(
       "Invalid pincode."
     );
+
   }
 
 
   return value;
+
 }
 
 /* ============================================================
@@ -467,18 +504,22 @@ function calculateOrder(
     !Array.isArray(items) ||
     items.length === 0
   ) {
+
     throw new Error(
       "Cart is empty."
     );
+
   }
 
 
   if (
     items.length > 30
   ) {
+
     throw new Error(
       "Too many different items."
     );
+
   }
 
 
@@ -511,9 +552,11 @@ function calculateOrder(
       quantity < 1 ||
       quantity > 20
     ) {
+
       throw new Error(
         "Invalid item quantity."
       );
+
     }
 
 
@@ -525,9 +568,11 @@ function calculateOrder(
       !product ||
       product.available !== true
     ) {
+
       throw new Error(
         `Item unavailable: ${id}`
       );
+
     }
 
 
@@ -559,6 +604,7 @@ function calculateOrder(
 
     subtotal +=
       lineTotal;
+
   }
 
 
@@ -586,6 +632,7 @@ function calculateOrder(
       BUSINESS.currency
 
   };
+
 }
 
 /* ============================================================
@@ -630,6 +677,7 @@ app.get(
         new Date().toISOString()
 
     });
+
   }
 );
 
@@ -664,6 +712,7 @@ app.get(
         )
 
     });
+
   }
 );
 
@@ -823,7 +872,9 @@ app.post(
         error.message ||
           "Unable to create payment order."
       );
+
     }
+
   }
 );
 
@@ -868,6 +919,7 @@ app.post(
           400,
           "Incomplete payment verification data."
         );
+
       }
 
 
@@ -894,6 +946,7 @@ app.post(
           404,
           "Order not found."
         );
+
       }
 
 
@@ -911,6 +964,7 @@ app.post(
           400,
           "Payment order mismatch."
         );
+
       }
 
 
@@ -941,6 +995,7 @@ app.post(
             order.status
 
         });
+
       }
 
 
@@ -992,6 +1047,7 @@ app.post(
           400,
           "Payment signature verification failed."
         );
+
       }
 
 
@@ -1017,6 +1073,7 @@ app.post(
           400,
           "Gateway order mismatch."
         );
+
       }
 
 
@@ -1030,6 +1087,7 @@ app.post(
           400,
           `Payment is not captured. Current status: ${payment.status}`
         );
+
       }
 
 
@@ -1051,6 +1109,7 @@ app.post(
           400,
           "Payment amount mismatch."
         );
+
       }
 
 
@@ -1077,9 +1136,11 @@ app.post(
           if (
             !latestSnapshot.exists
           ) {
+
             throw new Error(
               "Order no longer exists."
             );
+
           }
 
 
@@ -1091,7 +1152,9 @@ app.post(
             latest.paymentStatus ===
             "PAID"
           ) {
+
             return;
+
           }
 
 
@@ -1214,10 +1277,11 @@ app.post(
         500,
         "Payment verification failed."
       );
+
     }
+
   }
 );
-
 /* ============================================================
    CUSTOMER ORDER LOOKUP
 ============================================================ */
@@ -1261,6 +1325,7 @@ app.post(
           400,
           "Invalid lookup details."
         );
+
       }
 
 
@@ -1284,6 +1349,7 @@ app.post(
           404,
           "Order not found."
         );
+
       }
 
 
@@ -1305,6 +1371,7 @@ app.post(
           404,
           "Order not found."
         );
+
       }
 
 
@@ -1360,9 +1427,12 @@ app.post(
         500,
         "Unable to retrieve order."
       );
+
     }
+
   }
 );
+
 
 /* ============================================================
    CUSTOMER TRACKING
@@ -1408,6 +1478,7 @@ app.get(
           404,
           "Order not found."
         );
+
       }
 
 
@@ -1467,9 +1538,219 @@ app.get(
         500,
         "Unable to retrieve order."
       );
+
     }
+
   }
 );
+
+
+/* ============================================================
+   TEMPORARY ADMIN CLAIM SETUP
+============================================================ */
+
+/*
+  IMPORTANT:
+
+  This endpoint is ONLY for the initial Firebase
+  administrator setup.
+
+  Render Environment Variable required:
+
+      ADMIN_SETUP_TOKEN
+
+  Request:
+
+      POST /api/setup/admin-claim
+
+  Header:
+
+      x-admin-setup-token: <ADMIN_SETUP_TOKEN>
+
+  JSON body:
+
+      {
+        "email": "your-admin-email@example.com"
+      }
+
+  After successfully assigning the claim:
+
+  1. Remove this endpoint from server.js.
+  2. Remove ADMIN_SETUP_TOKEN from Render.
+  3. Redeploy.
+
+  Do NOT leave this endpoint enabled permanently.
+*/
+
+app.post(
+  "/api/setup/admin-claim",
+
+  async (
+    req,
+    res
+  ) => {
+
+    try {
+
+      const configuredToken =
+        process.env
+          .ADMIN_SETUP_TOKEN;
+
+
+      /*
+        Endpoint remains unavailable unless
+        the setup token exists in the environment.
+      */
+
+      if (
+        !configuredToken
+      ) {
+
+        return sendError(
+          res,
+          404,
+          "Not found."
+        );
+
+      }
+
+
+      const suppliedToken =
+        text(
+          req.headers[
+            "x-admin-setup-token"
+          ],
+          500
+        );
+
+
+      if (
+        !suppliedToken ||
+        suppliedToken !==
+          configuredToken
+      ) {
+
+        return sendError(
+          res,
+          401,
+          "Unauthorized."
+        );
+
+      }
+
+
+      requireFirebase();
+
+
+      const email =
+        text(
+          req.body?.email,
+          200
+        ).toLowerCase();
+
+
+      if (
+        !email ||
+        !email.includes("@")
+      ) {
+
+        return sendError(
+          res,
+          400,
+          "Valid admin email is required."
+        );
+
+      }
+
+
+      const user =
+        await admin
+          .auth()
+          .getUserByEmail(
+            email
+          );
+
+
+      /*
+        Preserve any existing custom claims
+        and only add admin: true.
+      */
+
+      const existingClaims =
+        user.customClaims || {};
+
+
+      await admin
+        .auth()
+        .setCustomUserClaims(
+          user.uid,
+          {
+            ...existingClaims,
+            admin: true
+          }
+        );
+
+
+      console.log(
+        `✓ Admin claim assigned: ${email}`
+      );
+
+
+      return res.json({
+
+        success:
+          true,
+
+        message:
+          "Administrator claim assigned successfully.",
+
+        uid:
+          user.uid,
+
+        email:
+          user.email,
+
+        admin:
+          true
+
+      });
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        "Admin claim setup:",
+        error
+      );
+
+
+      if (
+        error.code ===
+        "auth/user-not-found"
+      ) {
+
+        return sendError(
+          res,
+          404,
+          "Firebase Authentication user not found."
+        );
+
+      }
+
+
+      return sendError(
+        res,
+        500,
+        "Unable to assign administrator claim."
+      );
+
+    }
+
+  }
+);
+
 
 /* ============================================================
    ADMIN STATUS CONFIG
@@ -1534,6 +1815,7 @@ const TRANSITIONS = {
 
 };
 
+
 /* ============================================================
    ADMIN ORDERS
 ============================================================ */
@@ -1595,6 +1877,7 @@ app.get(
           400,
           "Invalid order status."
         );
+
       }
 
 
@@ -1637,6 +1920,7 @@ app.get(
                 .toUpperCase() ===
               requestedStatus
           );
+
       }
 
 
@@ -1666,6 +1950,7 @@ app.get(
             bt -
             at
           );
+
         }
       );
 
@@ -1705,9 +1990,12 @@ app.get(
         500,
         "Unable to retrieve admin orders."
       );
+
     }
+
   }
 );
+
 
 /* ============================================================
    ADMIN SINGLE ORDER
@@ -1758,6 +2046,7 @@ app.get(
           404,
           "Order not found."
         );
+
       }
 
 
@@ -1825,10 +2114,11 @@ app.get(
         500,
         "Unable to retrieve order."
       );
+
     }
+
   }
 );
-
 /* ============================================================
    ADMIN STATUS UPDATE
 ============================================================ */
@@ -2121,6 +2411,7 @@ app.patch(
   }
 );
 
+
 /* ============================================================
    ADMIN STATS
 ============================================================ */
@@ -2273,6 +2564,7 @@ app.get(
   }
 );
 
+
 /* ============================================================
    ADMIN PAGE
 ============================================================ */
@@ -2310,6 +2602,7 @@ app.get(
   }
 );
 
+
 /* ============================================================
    API 404
 ============================================================ */
@@ -2326,6 +2619,7 @@ app.use(
 
   }
 );
+
 
 /* ============================================================
    GLOBAL ERROR HANDLER
@@ -2369,6 +2663,7 @@ app.use(
 
   }
 );
+
 
 /* ============================================================
    START SERVER
